@@ -7,6 +7,7 @@ import com.mojang.serialization.DynamicOps;
 import dev.latvian.mods.kubejs.component.DataComponentWrapper;
 import dev.latvian.mods.kubejs.error.KubeRuntimeException;
 import dev.latvian.mods.kubejs.script.SourceLine;
+import dev.latvian.mods.kubejs.typings.Info;
 import dev.latvian.mods.kubejs.util.ID;
 import dev.latvian.mods.kubejs.util.RegExpKJS;
 import dev.latvian.mods.kubejs.util.RegistryAccessContainer;
@@ -15,6 +16,7 @@ import dev.latvian.mods.rhino.Wrapper;
 import dev.latvian.mods.rhino.type.TypeInfo;
 import dev.latvian.mods.rhino.util.HideFromJS;
 import net.minecraft.core.Holder;
+import net.minecraft.core.HolderSet;
 import net.minecraft.core.component.DataComponentMap;
 import net.minecraft.core.component.DataComponentPredicate;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -76,6 +78,17 @@ public interface FluidWrapper {
 		return of;
 	}
 
+	@Info("Returns an ingredient that accepts the given set of fluids under the given component filter.")
+	static FluidIngredient ingredientOf(HolderSet<Fluid> base, DataComponentMap data) {
+		return ingredientOf(base, data, false);
+	}
+
+	@Info("Returns an ingredient that accepts the given set of items under the given (optionally strict) component filter.")
+	static FluidIngredient ingredientOf(HolderSet<Fluid> base, DataComponentMap data, boolean strict) {
+		return DataComponentFluidIngredient.of(strict, data, base);
+	}
+
+
 	@HideFromJS
 	static DataResult<FluidIngredient> tryWrapIngredient(Context cx, Object from) {
 		while (from instanceof Wrapper w) {
@@ -136,20 +149,24 @@ public interface FluidWrapper {
 				.source(SourceLine.of(cx)));
 	}
 
+	@Info("Returns a FluidStack of the input")
 	static FluidStack of(FluidStack o) {
 		return o;
 	}
 
+	@Info("Returns a FluidStack of the input, with the specified amount")
 	static FluidStack of(FluidStack o, int amount) {
 		o.setAmount(amount);
 		return o;
 	}
 
+	@Info("Returns a FluidStack of the input, with the specified data components")
 	static FluidStack of(FluidStack o, DataComponentMap components) {
 		o.applyComponents(components);
 		return o;
 	}
 
+	@Info("Returns a FluidStack of the input, with the specified amount and data components")
 	static FluidStack of(FluidStack o, int amount, DataComponentMap components) {
 		o.setAmount(amount);
 		o.applyComponents(components);
@@ -325,13 +342,13 @@ public interface FluidWrapper {
 			var amountd = reader.readDouble();
 			reader.skipWhitespace();
 
-			if (reader.peek() == 'b' || reader.peek() == 'B') {
+			if (reader.canRead() && (reader.peek() == 'b' || reader.peek() == 'B')) {
 				reader.skip();
 				reader.skipWhitespace();
 				amountd *= FluidType.BUCKET_VOLUME;
 			}
 
-			if (reader.peek() == '/') {
+			if (reader.canRead() && reader.peek() == '/') {
 				reader.skip();
 				reader.skipWhitespace();
 				amountd = amountd / reader.readDouble();
@@ -342,7 +359,7 @@ public interface FluidWrapper {
 			reader.skipWhitespace();
 
 			if (amount < 1) {
-				throw new IllegalArgumentException("Fluid amount smaller than 1 is not allowed!");
+				return error(() -> "Fluid amount smaller than 1 is not allowed!");
 			}
 
 			return success(amount);

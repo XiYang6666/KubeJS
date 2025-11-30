@@ -1,6 +1,5 @@
 package dev.latvian.mods.kubejs.item;
 
-import dev.latvian.mods.kubejs.component.ComponentFunctions;
 import dev.latvian.mods.kubejs.component.ItemComponentFunctions;
 import dev.latvian.mods.kubejs.core.DiggerItemKJS;
 import dev.latvian.mods.kubejs.event.KubeEvent;
@@ -49,7 +48,7 @@ public class ItemModificationKubeEvent implements KubeEvent {
 
 		@Override
 		@HideFromJS
-		public <T> ComponentFunctions kjs$override(DataComponentType<T> type, @Nullable T value) {
+		public <T> ItemComponentFunctions kjs$override(DataComponentType<T> type, @Nullable T value) {
 			item.kjs$overrideComponent(type, value);
 			return this;
 		}
@@ -62,15 +61,15 @@ public class ItemModificationKubeEvent implements KubeEvent {
 			this.item.kjs$setCraftingRemainder(item);
 		}
 
-		public void setTier(Consumer<MutableToolTier> c) {
+		public void setTier(Consumer<MutableToolTier> builder) {
 			if (item instanceof TieredItem tiered) {
 				var oldTier = tiered.tier;
-				var tier = Util.make(new MutableToolTier(tiered.tier), c);
+				var tier = Util.make(new MutableToolTier(tiered.tier), builder);
 				tiered.tier = tier;
 
 				// need to update modifiers for attack dmg; this is quite messy but oh well
 				var modifiers = ItemAttributeModifiers.builder();
-				for (var entry : kjs$get(DataComponents.ATTRIBUTE_MODIFIERS).modifiers()) {
+				for (var entry : kjs$getAttributeModifiers().modifiers()) {
 					if (entry.matches(Attributes.ATTACK_DAMAGE, BASE_ATTACK_DAMAGE_ID)) {
 						double base = entry.modifier().amount() - oldTier.getAttackDamageBonus();
 						modifiers.add(entry.attribute(),
@@ -80,8 +79,9 @@ public class ItemModificationKubeEvent implements KubeEvent {
 						modifiers.add(entry.attribute(), entry.modifier(), entry.slot());
 					}
 				}
-				kjs$override(DataComponents.ATTRIBUTE_MODIFIERS, modifiers.build());
+				kjs$setAttributeModifiers(modifiers.build());
 
+				kjs$setMaxDamage(tier.getUses());
 				// if it's a digger item we also need to modify the tool properties
 				if (tiered instanceof DiggerItemKJS dig) {
 					kjs$setTool(tier.createToolProperties(dig.kjs$getMineableTag()));

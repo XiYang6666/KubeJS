@@ -2,6 +2,7 @@ package dev.latvian.mods.kubejs.component;
 
 import dev.latvian.mods.kubejs.color.KubeColor;
 import dev.latvian.mods.rhino.util.RemapPrefixForJS;
+import dev.latvian.mods.rhino.util.ReturnsSelf;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
@@ -15,6 +16,7 @@ import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.FireworkExplosion;
 import net.minecraft.world.item.component.Fireworks;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
 import net.minecraft.world.item.component.MapItemColor;
 import net.minecraft.world.item.component.Tool;
 import net.minecraft.world.item.component.Unbreakable;
@@ -22,7 +24,8 @@ import net.minecraft.world.item.component.Unbreakable;
 import java.util.List;
 
 @RemapPrefixForJS("kjs$")
-public interface ItemComponentFunctions extends ComponentFunctions {
+@ReturnsSelf
+public interface ItemComponentFunctions extends ComponentFunctions, AttributeModifierFunctions {
 	default void kjs$setMaxStackSize(int size) {
 		kjs$override(DataComponents.MAX_STACK_SIZE, size);
 	}
@@ -101,5 +104,16 @@ public interface ItemComponentFunctions extends ComponentFunctions {
 
 	default void kjs$setNoteBlockSound(ResourceLocation id) {
 		kjs$override(DataComponents.NOTE_BLOCK_SOUND, id);
+	}
+
+	@Override
+	default ItemAttributeModifiers kjs$getAttributeModifiers() {
+		var mods = kjs$get(DataComponents.ATTRIBUTE_MODIFIERS);
+		return mods == null ? new ItemAttributeModifiers(List.of(), true) : mods;
+	}
+
+	@Override
+	default void kjs$setAttributeModifiers(ItemAttributeModifiers modifiers) {
+		kjs$override(DataComponents.ATTRIBUTE_MODIFIERS, modifiers);
 	}
 }

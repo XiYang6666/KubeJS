@@ -1,61 +1,75 @@
 package dev.latvian.mods.kubejs.component;
 
+import com.google.gson.JsonObject;
 import com.mojang.brigadier.StringReader;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
+import dev.latvian.mods.kubejs.error.KubeRuntimeException;
 import dev.latvian.mods.kubejs.plugin.KubeJSPlugin;
 import dev.latvian.mods.kubejs.plugin.KubeJSPlugins;
+import dev.latvian.mods.kubejs.script.DataComponentTypeInfoRegistry;
+import dev.latvian.mods.kubejs.script.SourceLine;
 import dev.latvian.mods.kubejs.util.Cast;
 import dev.latvian.mods.kubejs.util.ID;
+import dev.latvian.mods.kubejs.util.JsonUtils;
 import dev.latvian.mods.kubejs.util.Lazy;
+import dev.latvian.mods.kubejs.util.RegistryAccessContainer;
+import dev.latvian.mods.rhino.BaseFunction;
+import dev.latvian.mods.rhino.Context;
+import dev.latvian.mods.rhino.EvaluatorException;
 import dev.latvian.mods.rhino.NativeJavaMap;
+import dev.latvian.mods.rhino.Undefined;
 import dev.latvian.mods.rhino.type.TypeInfo;
+import net.minecraft.Util;
 import net.minecraft.core.component.DataComponentMap;
 import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.core.component.DataComponentPredicate;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.component.PatchedDataComponentMap;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.component.CustomData;
+import org.apache.commons.lang3.mutable.MutableObject;
 import org.jetbrains.annotations.Nullable;
 
-import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.StringJoiner;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Function;
+
+import static com.mojang.serialization.DataResult.error;
+import static com.mojang.serialization.DataResult.success;
 
 public interface DataComponentWrapper {
-	DynamicCommandExceptionType ERROR_UNKNOWN_COMPONENT = new DynamicCommandExceptionType((object) -> Component.translatableEscape("arguments.item.component.unknown", object));
+	DynamicCommandExceptionType ERROR_UNKNOWN_COMPONENT = new DynamicCommandExceptionType(object -> Component.translatableEscape("arguments.item.component.unknown", object));
 	Dynamic2CommandExceptionType ERROR_MALFORMED_COMPONENT = new Dynamic2CommandExceptionType((object, object2) -> Component.translatableEscape("arguments.item.component.malformed", object, object2));
 	SimpleCommandExceptionType ERROR_EXPECTED_COMPONENT = new SimpleCommandExceptionType(Component.translatable("arguments.item.component.expected"));
-	Lazy<Map<DataComponentType<?>, TypeInfo>> TYPE_INFOS = Lazy.identityMap(map -> {
-		try {
-			for (var field : DataComponents.class.getDeclaredFields()) {
-				if (field.getType() == DataComponentType.class
-					&& Modifier.isPublic(field.getModifiers())
-					&& Modifier.isStatic(field.getModifiers())
-					&& field.getGenericType() instanceof ParameterizedType t
-				) {
-					var key = (DataComponentType) field.get(null);
-					var typeInfo = TypeInfo.of(t.getActualTypeArguments()[0]);
-					map.put(key, typeInfo);
-				}
-			}
-		} catch (Exception ex) {
-			ex.printStackTrace();
-		}
 
-		KubeJSPlugins.forEachPlugin(map::put, KubeJSPlugin::registerDataComponentTypeDescriptions);
+	TypeInfo COMPONENT_TYPE = TypeInfo.of(DataComponentType.class);
+
+	Lazy<Map<DataComponentType<?>, TypeInfo>> TYPE_INFOS = Lazy.identityMap(map -> {
+		DataComponentTypeInfoRegistry registry = map::put;
+
+		registry.scanClass(DataComponents.class);
+		KubeJSPlugins.forEachPlugin(registry, KubeJSPlugin::registerDataComponentTypeDescriptions);
 	});
 
 	Lazy<Set<DataComponentType<?>>> VISUAL_DIFFERENCE = Lazy.of(() -> {
@@ -122,7 +136,7 @@ public interface DataComponentWrapper {
 					builder = DataComponentMap.builder();
 				}
 
-				builder.set(dataComponentType, Cast.to(dataResult.getOrThrow((string) -> {
+				builder.set(dataComponentType, Cast.to(dataResult.getOrThrow(string -> {
 					reader.setCursor(i);
 					return ERROR_MALFORMED_COMPONENT.createWithContext(reader, dataComponentType.toString(), string);
 				})));
@@ -203,7 +217,7 @@ public interface DataComponentWrapper {
 					builder = DataComponentPatch.builder();
 				}
 
-				builder.set(dataComponentType, Cast.to(dataResult.getOrThrow((string) -> {
+				builder.set(dataComponentType, Cast.to(dataResult.getOrThrow(string -> {
 					reader.setCursor(i);
 					return ERROR_MALFORMED_COMPONENT.createWithContext(reader, dataComponentType.toString(), string);
 				})));
@@ -261,6 +275,7 @@ public interface DataComponentWrapper {
 		return from == null || from instanceof DataComponentMap || from instanceof DataComponentPatch || from instanceof Map || from instanceof NativeJavaMap || from instanceof String s && (s.isEmpty() || s.charAt(0) == '[');
 	}
 
+	@Deprecated(forRemoval = true)
 	static DataComponentMap mapOf(@Nullable DynamicOps<Tag> ops, Object o) {
 		try {
 			return readMap(ops, new StringReader(o.toString()));
@@ -269,6 +284,7 @@ public interface DataComponentWrapper {
 		}
 	}
 
+	@Deprecated(forRemoval = true)
 	static DataComponentMap mapOrEmptyOf(@Nullable DynamicOps<Tag> ops, Object o) {
 		try {
 			return readMap(ops, new StringReader(o.toString()));
@@ -277,6 +293,7 @@ public interface DataComponentWrapper {
 		}
 	}
 
+	@Deprecated(forRemoval = true)
 	static DataComponentPatch patchOf(@Nullable DynamicOps<Tag> ops, Object o) {
 		try {
 			return readPatch(ops, new StringReader(o.toString()));
@@ -285,11 +302,187 @@ public interface DataComponentWrapper {
 		}
 	}
 
+	@Deprecated(forRemoval = true)
 	static DataComponentPatch patchOrEmptyOf(@Nullable DynamicOps<Tag> ops, Object o) {
 		try {
 			return readPatch(ops, new StringReader(o.toString()));
 		} catch (CommandSyntaxException ex) {
 			return DataComponentPatch.EMPTY;
+		}
+	}
+
+	static DataComponentMap mapOf(Context cx, Object from) {
+		return tryMapOf(cx, from)
+			.getOrThrow(error -> new KubeRuntimeException("Failed to wrap DataComponentMap: %s".formatted(error))
+				.source(SourceLine.of(cx)));
+	}
+
+	static DataComponentPatch patchOf(Context cx, Object from) {
+		return tryPatchOf(cx, from)
+			.getOrThrow(error -> new KubeRuntimeException("Failed to wrap DataComponentPatch: %s".formatted(error))
+				.source(SourceLine.of(cx)));
+	}
+
+	static DataComponentMap mapOrEmptyOf(Context cx, Object from) {
+		return tryMapOf(cx, from)
+			.resultOrPartial()
+			.orElse(DataComponentMap.EMPTY);
+	}
+
+	static DataComponentPatch patchOrEmptyOf(Context cx, Object from) {
+		return tryPatchOf(cx, from)
+			.resultOrPartial()
+			.orElse(DataComponentPatch.EMPTY);
+	}
+
+	static DataResult<DataComponentMap> tryMapOf(Context cx, @Nullable Object o) {
+		var reg = RegistryAccessContainer.of(cx);
+		return switch (o) {
+			case DataComponentMap map -> success(map);
+			case DataComponentPatch patch -> success(PatchedDataComponentMap.fromPatch(DataComponentMap.EMPTY, patch));
+			case BaseFunction fn -> fnToBuilder(cx, MapBuilder.class, fn,
+				builder -> Util.make(DataComponentMap.builder(), builder).build());
+			case JsonObject json -> DataComponentMap.CODEC.parse(reg.json(), json);
+			case CompoundTag tag -> DataComponentMap.CODEC.parse(reg.nbt(), tag);
+			case Map<?, ?> map -> {
+				var builder = DataComponentMap.builder();
+
+				Map<DataComponentType<?>, ?> wrapped = Objects.requireNonNull(cx.optionalMapOf(map, COMPONENT_TYPE, TypeInfo.NONE));
+				Map<DataComponentType<?>, String> errors = new HashMap<>();
+
+				for (var entry : wrapped.entrySet()) {
+					wrapEntry(cx, entry, null, builder::set, errors::put);
+				}
+
+				if (!errors.isEmpty()) {
+					var joiner = new StringJoiner("; ");
+					errors.forEach((type, error) -> {
+						var id = reg.access().registryOrThrow(Registries.DATA_COMPONENT_TYPE).getKeyOrNull(type);
+						joiner.add("'%s' -> %s".formatted(id, error));
+					});
+					yield error(() -> "Invalid component map format, errored input: [%s]".formatted(joiner.toString()), builder.build());
+				} else {
+					yield success(builder.build());
+				}
+			}
+			case null -> success(DataComponentMap.EMPTY);
+			case String s -> {
+				try {
+					yield success(readMap(reg.nbt(), new StringReader(s)));
+				} catch (CommandSyntaxException ex) {
+					yield error(() -> "Invalid string format '%s' for DataComponentMap: %s".formatted(s, ex.getMessage()));
+				}
+			}
+			default -> error(() -> "Don't know how to convert %s to DataComponentMap!".formatted(o));
+		};
+	}
+
+	static DataResult<DataComponentPatch> tryPatchOf(Context cx, @Nullable Object o) {
+		var reg = RegistryAccessContainer.of(cx);
+		return switch (o) {
+			case DataComponentPatch patch -> success(patch);
+			case BaseFunction fn -> fnToBuilder(cx, PatchBuilder.class, fn,
+				builder -> Util.make(DataComponentPatch.builder(), builder).build());
+			case JsonObject json -> DataComponentPatch.CODEC.parse(reg.json(), json);
+			case CompoundTag tag -> DataComponentPatch.CODEC.parse(reg.nbt(), tag);
+			case Map<?, ?> map -> {
+				var builder = DataComponentPatch.builder();
+
+				Map<DataComponentType<?>, ?> wrapped = Objects.requireNonNull(cx.optionalMapOf(map, COMPONENT_TYPE, TypeInfo.NONE));
+				Map<DataComponentType<?>, String> errors = new HashMap<>();
+
+				for (var entry : wrapped.entrySet()) {
+					wrapEntry(cx, entry, builder::remove, builder::set, errors::put);
+				}
+
+				if (!errors.isEmpty()) {
+					var joiner = new StringJoiner("; ");
+					errors.forEach((type, error) -> {
+						var id = reg.access().registryOrThrow(Registries.DATA_COMPONENT_TYPE).getKeyOrNull(type);
+						joiner.add("'%s' -> %s".formatted(id, error));
+					});
+					yield error(() -> "Invalid component map format, errored input: [%s]".formatted(joiner.toString()), builder.build());
+				} else {
+					yield success(builder.build());
+				}
+			}
+			case null -> success(DataComponentPatch.EMPTY);
+			case String s -> {
+				try {
+					yield success(readPatch(reg.nbt(), new StringReader(s)));
+				} catch (CommandSyntaxException ex) {
+					yield error(() -> "Invalid string format '%s' for DataComponentPatch: %s".formatted(s, ex.getMessage()));
+				}
+			}
+			default -> error(() -> "Don't know how to convert %s to DataComponentPatch!".formatted(o));
+		};
+	}
+
+	static <T> DataResult<Optional<T>> tryWrapComponent(Context cx, DataComponentType<T> type, Object value) {
+		var reg = RegistryAccessContainer.of(cx);
+
+		var valueType = getTypeInfo(type);
+
+		if (value == null || value instanceof Undefined) {
+			return success(Optional.empty());
+		}
+
+		var evalError = new MutableObject<EvaluatorException>();
+
+		if (valueType.shouldConvert() && cx.canConvert(value, valueType)) {
+			try {
+				Object converted = cx.jsToJava(value, valueType);
+				if (converted != null) {
+					return success(Optional.of(Cast.to(converted)));
+				}
+			} catch (EvaluatorException e) {
+				evalError.setValue(e);
+			}
+		}
+
+
+		var codec = type.codec();
+
+		if (codec != null) {
+			//noinspection unchecked
+			return (DataResult<Optional<T>>) switch (codec.parse(reg.json(), JsonUtils.of(cx, value))) {
+				case DataResult.Success<?> success -> success.map(Optional::of);
+				case DataResult.Error<?> error -> error.mapError(err -> evalError.getValue() != null
+					? "Failed to parse component from type wrappers and codec! Native: %s, Codec: %s".formatted(evalError.getValue().details(), err)
+					: "Failed to parse component from codec: %s!".formatted(err));
+			};
+		} else {
+			return error(() -> "Component has non-serializable type");
+		}
+	}
+
+	private static void wrapEntry(
+		Context cx,
+		Map.Entry<DataComponentType<?>, ?> entry,
+		@Nullable Consumer<DataComponentType<?>> ifNull,
+		@SuppressWarnings("rawtypes") BiConsumer<DataComponentType, Object> builder,
+		BiConsumer<DataComponentType<?>, String> errorBuilder
+	) {
+		var type = entry.getKey();
+		var value = entry.getValue();
+
+		tryWrapComponent(cx, type, value)
+			.ifSuccess(success -> {
+				if (success.isPresent()) {
+					builder.accept(type, success.get());
+				} else if (ifNull != null) {
+					ifNull.accept(type);
+				}
+			})
+			.ifError(error -> errorBuilder.accept(type, error.message()));
+	}
+
+	private static <B, T> DataResult<T> fnToBuilder(Context cx, Class<B> builderType, BaseFunction fn, Function<B, T> build) {
+		try {
+			B builder = Cast.to(cx.createInterfaceAdapter(TypeInfo.of(builderType), fn));
+			return success(build.apply(builder));
+		} catch (Exception e) {
+			return error(() -> "Failed to create %s from builder: %s".formatted(builderType.toString(), e));
 		}
 	}
 
@@ -380,5 +573,15 @@ public interface DataComponentWrapper {
 		}
 
 		return builder.build();
+	}
+
+	interface MapBuilder extends Consumer<DataComponentMap.Builder> {
+		@Override
+		void accept(DataComponentMap.Builder builder);
+	}
+
+	interface PatchBuilder extends Consumer<DataComponentPatch.Builder> {
+		@Override
+		void accept(DataComponentPatch.Builder builder);
 	}
 }

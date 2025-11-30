@@ -18,6 +18,7 @@ import dev.latvian.mods.kubejs.recipe.component.RecipeComponentType;
 import dev.latvian.mods.kubejs.recipe.schema.postprocessing.RecipePostProcessor;
 import dev.latvian.mods.kubejs.recipe.schema.postprocessing.RecipePostProcessorType;
 import dev.latvian.mods.kubejs.script.ScriptType;
+import dev.latvian.mods.kubejs.server.ServerScriptManager;
 import dev.latvian.mods.kubejs.util.ID;
 import dev.latvian.mods.kubejs.util.JsonUtils;
 import dev.latvian.mods.kubejs.util.RegistryAccessContainer;
@@ -28,9 +29,9 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 
 public class RecipeSchemaStorage {
+
 	public static final class StoredRecipeComponentType {
 		private final RecipeComponentType<?> type;
 		private MapCodec<RecipeComponent<?>> mapCodec;
@@ -51,17 +52,18 @@ public class RecipeSchemaStorage {
 		}
 	}
 
+	private final ServerScriptManager manager;
+
 	public final Map<ResourceLocation, KubeRecipeFactory> recipeTypes;
 	public final Map<String, RecipeNamespace> namespaces;
 	public final Map<String, ResourceLocation> mappings;
 	public final Map<String, RecipeSchemaType> schemaTypes;
-	public RecipeSchema shapedSchema;
-	public RecipeSchema shapelessSchema;
-	public RecipeSchema specialSchema;
+
 	public Codec<RecipeComponent<?>> recipeComponentCodec;
 	public Codec<RecipePostProcessor> recipePostProcessorCodec;
 
-	public RecipeSchemaStorage() {
+	public RecipeSchemaStorage(ServerScriptManager manager) {
+		this.manager = manager;
 		this.recipeTypes = new HashMap<>();
 		this.namespaces = new HashMap<>();
 		this.mappings = new HashMap<>();
@@ -72,14 +74,15 @@ public class RecipeSchemaStorage {
 		return namespaces.computeIfAbsent(namespace, n -> new RecipeNamespace(this, n));
 	}
 
+	RegistryAccessContainer getRegistries() {
+		return manager.getRegistries();
+	}
+
 	public void fireEvents(RegistryAccessContainer registries, ResourceManager resourceManager) {
 		recipeTypes.clear();
 		namespaces.clear();
 		mappings.clear();
 		schemaTypes.clear();
-		shapedSchema = null;
-		shapelessSchema = null;
-		specialSchema = null;
 
 		var jsonOps = registries.json();
 
@@ -174,7 +177,7 @@ public class RecipeSchemaStorage {
 					}
 				}
 			} catch (Exception ex) {
-				ex.printStackTrace();
+				KubeJS.LOGGER.error("Failed to load recipe component file {}: {}", entry.getKey(), ex);
 			}
 		}
 
@@ -187,10 +190,6 @@ public class RecipeSchemaStorage {
 
 		var schemaRegistry = new RecipeSchemaRegistry(this);
 		JsonRecipeSchemaLoader.load(rcCtx, jsonOps, schemaRegistry, resourceManager);
-
-		shapedSchema = Objects.requireNonNull(namespace("minecraft").get("shaped").schema);
-		shapelessSchema = Objects.requireNonNull(namespace("minecraft").get("shapeless").schema);
-		specialSchema = Objects.requireNonNull(namespace("minecraft").get("special").schema);
 
 		KubeJSPlugins.forEachPlugin(schemaRegistry, KubeJSPlugin::registerRecipeSchemas);
 		ServerEvents.RECIPE_SCHEMA_REGISTRY.post(ScriptType.SERVER, schemaRegistry);

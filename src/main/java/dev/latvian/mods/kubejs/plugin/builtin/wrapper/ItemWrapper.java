@@ -13,7 +13,6 @@ import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
 import dev.latvian.mods.kubejs.component.DataComponentWrapper;
-import dev.latvian.mods.kubejs.core.IngredientKJS;
 import dev.latvian.mods.kubejs.error.KubeRuntimeException;
 import dev.latvian.mods.kubejs.script.SourceLine;
 import dev.latvian.mods.kubejs.typings.Info;
@@ -23,11 +22,11 @@ import dev.latvian.mods.kubejs.util.Lazy;
 import dev.latvian.mods.kubejs.util.RegistryAccessContainer;
 import dev.latvian.mods.rhino.Context;
 import dev.latvian.mods.rhino.Wrapper;
-import dev.latvian.mods.rhino.regexp.NativeRegExp;
 import dev.latvian.mods.rhino.type.TypeInfo;
 import dev.latvian.mods.rhino.util.HideFromJS;
 import net.minecraft.Util;
 import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponentMap;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.StringTag;
@@ -57,7 +56,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
-import java.util.regex.Pattern;
 
 @Info("Various item related helper methods")
 public interface ItemWrapper {
@@ -105,9 +103,22 @@ public interface ItemWrapper {
 		return in;
 	}
 
+	@Info("Returns an ItemStack of the input, with the specified data components")
+	static ItemStack of(ItemStack in, DataComponentMap components) {
+		in.applyComponents(components);
+		return in;
+	}
+
 	@Info("Returns an ItemStack of the input, with the specified count")
 	static ItemStack of(ItemStack in, int count) {
 		return in.kjs$withCount(count);
+	}
+
+	@Info("Returns an ItemStack of the input, with the specified count and data components")
+	static ItemStack of(ItemStack in, int count, DataComponentMap components) {
+		in.setCount(count);
+		in.applyComponents(components);
+		return in;
 	}
 
 	@HideFromJS
@@ -146,9 +157,6 @@ public interface ItemWrapper {
 			case ResourceLocation id -> findItem(id).map(Holder::value).map(Item::getDefaultInstance);
 			case JsonElement json -> parseJson(cx, registries.nbt(), json);
 			case StringTag tag -> wrapResult(cx, tag.getAsString());
-			// these two wrappers are safe because RegExIngredient is a safe ingredient to unwrap
-			case Pattern pattern -> IngredientWrapper.wrapResult(cx, from).map(IngredientKJS::kjs$getFirst);
-			case NativeRegExp nativeRegExp -> IngredientWrapper.wrapResult(cx, from).map(IngredientKJS::kjs$getFirst);
 			case CharSequence charSequence -> {
 				var os = from.toString().trim();
 				var s = os;

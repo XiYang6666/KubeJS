@@ -1,20 +1,28 @@
 package dev.latvian.mods.kubejs.holder;
 
+import dev.latvian.mods.kubejs.core.RegistryObjectKJS;
 import dev.latvian.mods.kubejs.script.KubeJSContext;
 import dev.latvian.mods.kubejs.util.Cast;
 import dev.latvian.mods.kubejs.util.ID;
 import dev.latvian.mods.kubejs.util.RegExpKJS;
 import dev.latvian.mods.rhino.Context;
+import dev.latvian.mods.rhino.regexp.NativeRegExp;
 import dev.latvian.mods.rhino.type.TypeInfo;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.Registry;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.neoforged.neoforge.registries.DeferredHolder;
+import net.neoforged.neoforge.registries.holdersets.OrHolderSet;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 public interface HolderWrapper {
 	TypeInfo HOLDER = TypeInfo.of(Holder.class);
@@ -49,47 +57,85 @@ public interface HolderWrapper {
 	}
 
 	static HolderSet<?> wrapSet(KubeJSContext cx, Object from, TypeInfo param) {
-		if (from instanceof HolderSet<?> h) {
-			return h;
-		}
-
 		var registry = cx.lookupRegistry(param, from);
 
 		var simpleHolders = wrapSimpleSet(registry, from);
+
 		if (simpleHolders != null) {
 			return simpleHolders;
 		}
 
-		if (from instanceof Iterable<?>) {
-			var holder = (List) cx.jsToJava(from, TypeInfo.RAW_LIST.withParams(HOLDER.withParams(param)));
-			return HolderSet.direct(holder);
+		if (from instanceof Iterable<?> itr) {
+			var allDirects = Stream.<HolderSet<?>>builder();
+			var complex = new ArrayList<HolderSet<?>>();
+
+			for (var elem : itr) {
+				var wrapped = wrapSet(cx, elem, param);
+
+				if (wrapped instanceof HolderSet.Direct direct) {
+					allDirects.accept(direct);
+				} else {
+					complex.add(wrapped);
+				}
+			}
+
+			var compressedDirects = allDirects.build().flatMap(HolderSet::stream).distinct().toList();
+
+			if (compressedDirects.isEmpty()) {
+				return switch (complex.size()) {
+					case 0 -> HolderSet.empty();
+					case 1 -> complex.getFirst();
+					default -> new OrHolderSet(complex);
+				};
+			} else {
+				if (complex.isEmpty()) {
+					return HolderSet.direct((List) compressedDirects);
+				} else {
+					complex.add(HolderSet.direct((List) compressedDirects));
+					return new OrHolderSet(complex);
+				}
+			}
 		} else {
-			var holder = wrap(cx, from, param);
+			var holder = (Holder) cx.jsToJava(from, HOLDER.withParams(param));
 			return HolderSet.direct(holder);
 		}
 	}
 
 	@Nullable
 	static <T> HolderSet<T> wrapSimpleSet(Registry<T> registry, Object from) {
-		var regex = RegExpKJS.wrap(from);
-
-		if (regex != null) {
-			return new RegExHolderSet<>(registry.asLookup(), regex);
-		}
-
-		if (from instanceof CharSequence) {
-			var s = from.toString();
-
-			if (s.isEmpty()) {
-				return HolderSet.empty();
-			} else if (s.charAt(0) == '@') {
-				return new NamespaceHolderSet<>(registry.asLookup(), s.substring(1));
-			} else if (s.charAt(0) == '#') {
-				var tagKey = TagKey.create(registry.key(), ResourceLocation.parse(s.substring(1)));
-				return registry.getOrCreateTag(tagKey);
+		return switch (from) {
+			case HolderSet set -> set;
+			case Holder holder when holder.canSerializeIn(registry.holderOwner()) -> HolderSet.direct(holder);
+			case NativeRegExp regex -> RegExHolderSet.of(registry.asLookup(), RegExpKJS.wrap(regex));
+			case Pattern regex -> RegExHolderSet.of(registry.asLookup(), regex);
+			case RegistryObjectKJS registered -> wrapSimpleSet(registry, registered.kjs$asHolder());
+			case TagKey tag when tag.isFor(registry.key()) -> orEmpty(registry.getTag(tag));
+			case ResourceKey<?> key when key.isFor(registry.key()) -> orEmpty(key.cast(registry.key())
+				.flatMap(registry::getHolder)
+				.map(HolderSet::direct));
+			case ResourceLocation id -> orEmpty(registry.getHolder(id).map(HolderSet::direct));
+			case CharSequence cs when cs.isEmpty() -> HolderSet.empty();
+			case CharSequence cs -> {
+				var s = cs.toString();
+				yield switch (s.charAt(0)) {
+					case '@' -> NamespaceHolderSet.of(registry.asLookup(), s.substring(1));
+					case '#' -> {
+						var tagKey = TagKey.create(registry.key(), ResourceLocation.parse(s.substring(1)));
+						yield registry.getOrCreateTag(tagKey);
+					}
+					case '/' -> wrapSimpleSet(registry, RegExpKJS.wrap(from));
+					default -> ResourceLocation.read(s)
+						.result()
+						.map(id -> wrapSimpleSet(registry, id))
+						.orElse(null);
+				};
 			}
-		}
+			case null, default -> null;
+		};
+	}
 
-		return null;
+	@SuppressWarnings("all")
+	private static <T> HolderSet<T> orEmpty(Optional<? extends HolderSet<T>> holder) {
+		return ((Optional<HolderSet<T>>) holder).orElse(HolderSet.empty());
 	}
 }

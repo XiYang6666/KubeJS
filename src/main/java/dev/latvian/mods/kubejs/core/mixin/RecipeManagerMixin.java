@@ -4,12 +4,12 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Multimap;
 import com.google.gson.JsonElement;
 import com.llamalad7.mixinextras.sugar.Local;
+import dev.latvian.mods.kubejs.CommonProperties;
 import dev.latvian.mods.kubejs.core.RecipeManagerKJS;
 import dev.latvian.mods.kubejs.core.ReloadableServerResourcesKJS;
 import dev.latvian.mods.kubejs.net.KubeServerData;
 import dev.latvian.mods.kubejs.net.SyncServerDataPayload;
 import dev.latvian.mods.kubejs.plugin.builtin.event.ServerEvents;
-import dev.latvian.mods.kubejs.recipe.CompostableRecipesKubeEvent;
 import dev.latvian.mods.kubejs.recipe.RecipesKubeEvent;
 import dev.latvian.mods.kubejs.recipe.special.SpecialRecipeSerializerManager;
 import dev.latvian.mods.kubejs.script.ConsoleJS;
@@ -50,11 +50,6 @@ public abstract class RecipeManagerMixin implements RecipeManagerKJS {
 	)
 	private void customRecipesHead(Map<ResourceLocation, JsonElement> map, ResourceManager resourceManager, ProfilerFiller profiler, CallbackInfo ci) {
 		var manager = kjs$resources.kjs$getServerScriptManager();
-
-		// FIXME: data maps!
-		if (ServerEvents.COMPOSTABLE_RECIPES.hasListeners()) {
-			ServerEvents.COMPOSTABLE_RECIPES.post(ScriptType.SERVER, new CompostableRecipesKubeEvent());
-		}
 
 		for (var entry : manager.getRegistries().cachedRegistryTags.values()) {
 			if (entry.registry() == null || entry.lookup() == null) {
@@ -97,7 +92,9 @@ public abstract class RecipeManagerMixin implements RecipeManagerKJS {
 
 		kjs$event = null;
 
-		kjs$getResources().kjs$getServerScriptManager().serverData = new SyncServerDataPayload(KubeServerData.collect());
+		if (!CommonProperties.get().serverOnly) {
+			kjs$getResources().kjs$getServerScriptManager().serverData = new SyncServerDataPayload(KubeServerData.collect());
+		}
 	}
 
 	@Override

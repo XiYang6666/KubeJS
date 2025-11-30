@@ -100,10 +100,6 @@ public class KubeJSClientEventHandler {
 	public static void setupClient(FMLClientSetupEvent event) {
 		KubeJS.PROXY = new KubeJSClient();
 		event.enqueueWork(KubeJSClientEventHandler::setupClient0);
-
-		if (VSCodeExt.isInstalled()) {
-			ConsoleJS.CLIENT.info("VSCode " + VSCodeExt.getVersion() + " detected");
-		}
 	}
 
 	@SubscribeEvent
@@ -527,6 +523,7 @@ public class KubeJSClientEventHandler {
 
 		if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_SKY) {
 			HighlightRenderer.INSTANCE.clearBuffers(mc);
+			mc.getMainRenderTarget().bindWrite(true);
 		} else if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
 			HighlightRenderer.INSTANCE.renderAfterEntities(mc, event);
 		} else if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_LEVEL) {

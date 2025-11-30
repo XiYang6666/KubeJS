@@ -85,6 +85,7 @@ import dev.latvian.mods.kubejs.plugin.builtin.wrapper.AABBWrapper;
 import dev.latvian.mods.kubejs.plugin.builtin.wrapper.BlockWrapper;
 import dev.latvian.mods.kubejs.plugin.builtin.wrapper.ColorWrapper;
 import dev.latvian.mods.kubejs.plugin.builtin.wrapper.DamageSourceWrapper;
+import dev.latvian.mods.kubejs.plugin.builtin.wrapper.DataMapWrapper;
 import dev.latvian.mods.kubejs.plugin.builtin.wrapper.DirectionWrapper;
 import dev.latvian.mods.kubejs.plugin.builtin.wrapper.EntitySelectorWrapper;
 import dev.latvian.mods.kubejs.plugin.builtin.wrapper.IngredientWrapper;
@@ -102,6 +103,7 @@ import dev.latvian.mods.kubejs.plugin.builtin.wrapper.TextIcons;
 import dev.latvian.mods.kubejs.plugin.builtin.wrapper.TextWrapper;
 import dev.latvian.mods.kubejs.plugin.builtin.wrapper.UUIDWrapper;
 import dev.latvian.mods.kubejs.plugin.builtin.wrapper.UtilsWrapper;
+import dev.latvian.mods.kubejs.recipe.CompostableRecipesKubeEvent;
 import dev.latvian.mods.kubejs.recipe.component.BlockComponent;
 import dev.latvian.mods.kubejs.recipe.component.BlockStateComponent;
 import dev.latvian.mods.kubejs.recipe.component.BookCategoryComponent;
@@ -154,6 +156,7 @@ import dev.latvian.mods.kubejs.script.BindingRegistry;
 import dev.latvian.mods.kubejs.script.DataComponentTypeInfoRegistry;
 import dev.latvian.mods.kubejs.script.PlatformWrapper;
 import dev.latvian.mods.kubejs.script.RecordDefaultsRegistry;
+import dev.latvian.mods.kubejs.script.ScriptType;
 import dev.latvian.mods.kubejs.script.TypeDescriptionRegistry;
 import dev.latvian.mods.kubejs.script.TypeWrapperRegistry;
 import dev.latvian.mods.kubejs.server.ScheduledServerEvent;
@@ -168,7 +171,6 @@ import dev.latvian.mods.kubejs.util.NBTIOWrapper;
 import dev.latvian.mods.kubejs.util.NameProvider;
 import dev.latvian.mods.kubejs.util.NotificationToastData;
 import dev.latvian.mods.kubejs.util.RegExpKJS;
-import dev.latvian.mods.kubejs.util.RegistryAccessContainer;
 import dev.latvian.mods.kubejs.util.RotationAxis;
 import dev.latvian.mods.kubejs.util.ScheduledEvents;
 import dev.latvian.mods.kubejs.util.SlotFilter;
@@ -176,6 +178,7 @@ import dev.latvian.mods.kubejs.util.TickDuration;
 import dev.latvian.mods.kubejs.util.TimeJS;
 import dev.latvian.mods.kubejs.util.Tristate;
 import dev.latvian.mods.kubejs.util.registrypredicate.RegistryPredicate;
+import dev.latvian.mods.kubejs.web.LocalWebServer;
 import dev.latvian.mods.kubejs.web.LocalWebServerRegistry;
 import dev.latvian.mods.kubejs.web.local.KubeJSWeb;
 import dev.latvian.mods.rhino.type.RecordTypeInfo;
@@ -229,6 +232,7 @@ import net.minecraft.world.item.component.BlockItemStateProperties;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.CustomModelData;
 import net.minecraft.world.item.component.Fireworks;
+import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
@@ -286,6 +290,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 public class BuiltinKubeJSPlugin implements KubeJSPlugin {
@@ -450,6 +455,7 @@ public class BuiltinKubeJSPlugin implements KubeJSPlugin {
 		bindings.add("SizedIngredient", SizedIngredientWrapper.class);
 		bindings.add("ParticleOptions", ParticleOptionsWrapper.class);
 		bindings.add("Registry", RegistryWrapper.class);
+		bindings.add("DataMap", DataMapWrapper.class);
 		bindings.add("EntitySelector", EntitySelectorWrapper.class);
 
 		bindings.add("Fluid", FluidWrapper.class);
@@ -505,8 +511,8 @@ public class BuiltinKubeJSPlugin implements KubeJSPlugin {
 		registry.register(ListTag.class, (from, target) -> NBTWrapper.isTagCollection(from), NBTWrapper::wrapListTag);
 		registry.register(Tag.class, NBTWrapper::wrap);
 		registry.register(DataComponentType.class, DataComponentWrapper::wrapType);
-		registry.register(DataComponentMap.class, DataComponentWrapper::filter, (cx, from, target) -> DataComponentWrapper.mapOf(RegistryAccessContainer.of(cx).nbt(), from));
-		registry.register(DataComponentPatch.class, DataComponentWrapper::filter, (cx, from, target) -> DataComponentWrapper.patchOf(RegistryAccessContainer.of(cx).nbt(), from));
+		registry.register(DataComponentMap.class, DataComponentWrapper::filter, DataComponentWrapper::mapOf);
+		registry.register(DataComponentPatch.class, DataComponentWrapper::filter, DataComponentWrapper::patchOf);
 
 		registry.register(BlockPos.class, MiscWrappers::wrapBlockPos);
 		registry.register(Vec3.class, MiscWrappers::wrapVec3);
@@ -557,11 +563,12 @@ public class BuiltinKubeJSPlugin implements KubeJSPlugin {
 		registry.register(Tristate.class, Tristate::wrap);
 
 		// components //
-		registry.register(Component.class, TextWrapper::wrap);
 		registry.register(MutableComponent.class, TextWrapper::wrap);
 		registry.register(KubeColor.class, ColorWrapper::wrap);
 		registry.register(TextColor.class, ColorWrapper::wrapTextColor);
 		registry.register(ClickEvent.class, TextWrapper::wrapClickEvent);
+		registry.registerAlias(Component.class, TextWrapper.TYPE_INFO, Function.identity());
+		registry.registerAlias(ItemLore.class, TypeInfo.RAW_LIST.withParams(TextWrapper.TYPE_INFO), TextWrapper::lore);
 
 		// codecs
 		registry.registerCodec(Fireworks.class, Fireworks.CODEC);
@@ -736,6 +743,11 @@ public class BuiltinKubeJSPlugin implements KubeJSPlugin {
 	}
 
 	@Override
+	public void localWebServerStarted(LocalWebServer server) {
+		KubeJSWeb.serverStarted(server);
+	}
+
+	@Override
 	public void registerItemNameProviders(NameProvider.Registry<Item, ItemStack> registry) {
 		registry.register(Items.ENCHANTED_BOOK, (registries, stack) -> {
 			var enchants = EnchantmentHelper.getEnchantmentsForCrafting(stack);
@@ -816,6 +828,14 @@ public class BuiltinKubeJSPlugin implements KubeJSPlugin {
 
 	@Override
 	public void generateData(KubeDataGenerator generator) {
+		if (ServerEvents.COMPOSTABLE_RECIPES.hasListeners()) {
+			generator.dataMap(NeoForgeDataMaps.COMPOSTABLES,
+				map -> {
+					var event = new CompostableRecipesKubeEvent(map);
+					ServerEvents.COMPOSTABLE_RECIPES.post(ScriptType.SERVER, event);
+				});
+		}
+
 		generator.dataMap(NeoForgeDataMaps.FURNACE_FUELS, callback -> {
 			for (var entry : ItemModificationKubeEvent.ItemModifications.BURN_TIME_OVERRIDES.reference2IntEntrySet()) {
 				callback.accept(entry.getKey().kjs$getIdLocation(), new FurnaceFuel(entry.getIntValue()));
